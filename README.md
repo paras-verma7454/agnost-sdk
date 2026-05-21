@@ -5,7 +5,7 @@ Zero-config OpenTelemetry instrumentation for AI agents. Works with **OpenAI SDK
 > **Not published on npm yet.** Try it locally:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/paras-verma7454/agnost-sdk.git
 cd agnost
 npm install
 npm run build
@@ -189,7 +189,3 @@ DEV APP
 - No database. No backend. In-memory buffer flushed via OTLP.
 - Built on OpenTelemetry — works with any OTel-aware observability backend.
 - Identity propagates via `AsyncLocalStorage` — no manual threading.
-
-## License
-
-MIT
