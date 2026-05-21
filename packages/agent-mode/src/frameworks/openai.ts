@@ -5,11 +5,15 @@ import { getAgnostContext } from '../core/context';
 import { context, trace } from '@opentelemetry/api';
 import { setUser, setSession } from '@arizeai/openinference-core';
 
-function patchPrototype(OpenAI: any): void {
-  const originalCreate = OpenAI.prototype.chat?.completions?.create;
+function patchCompletions(OpenAI: any): void {
+  const tempClient = new OpenAI({ apiKey: '' });
+  const completions = tempClient.chat.completions;
+  const proto = Object.getPrototypeOf(completions);
+
+  const originalCreate = proto.create;
   if (!originalCreate) return;
 
-  OpenAI.prototype.chat.completions.create = async function (...args: any[]) {
+  proto.create = async function (...args: any[]) {
     const ctx = getAgnostContext();
     if (ctx?.userId) {
       let otelCtx = context.active();
@@ -55,7 +59,7 @@ export async function instrumentOpenAI(config: AgnostConfig): Promise<void> {
     const OpenAI = openaiModule.OpenAI || (openaiModule as any).default?.OpenAI || openaiModule;
 
     openAIInstrumentation.manuallyInstrument(OpenAI as never);
-    patchPrototype(OpenAI);
+    patchCompletions(OpenAI);
   } catch (err) {
     console.warn('[Agnost] OpenAI SDK not found. Skipping instrumentation.', (err as Error).message);
   }

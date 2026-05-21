@@ -1,6 +1,7 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { Resource } from '@opentelemetry/resources';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { AgnostConfig } from '../types';
 
 let sdk: NodeSDK | null = null;
@@ -13,12 +14,16 @@ export function getOtelProvider(config: AgnostConfig): NodeSDK {
     headers: { 'X-Agnost-Org-ID': config.orgId },
   });
 
+  const processor = new BatchSpanProcessor(exporter, {
+    scheduledDelayMillis: 1000,
+  });
+
   sdk = new NodeSDK({
     resource: new Resource({
       'service.name': 'agnost-agent-mode',
       'agnost.org.id': config.orgId,
     }),
-    traceExporter: exporter,
+    spanProcessor: processor,
   });
 
   sdk.start();

@@ -4,9 +4,7 @@ import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
 
 const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const client = new OpenAI();
 
 async function main() {
   await agnost.instrumentOpenAI();
