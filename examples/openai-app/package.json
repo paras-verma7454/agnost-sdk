@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "dev": "npm run build && node dist/server.js",
-    "dev:simple": "npm run build && node dist/index.js"
+    "start": "npm run build && node dist/server.js",
+    "dev": "npm run build && node dist/index.js"
   },
   "dependencies": {
     "@agnost/agent-mode": "*",
