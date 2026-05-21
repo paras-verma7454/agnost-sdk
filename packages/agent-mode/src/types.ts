@@ -1,0 +1,34 @@
+export interface AgnostConfig {
+  orgId: string;
+  endpoint?: string;
+}
+
+export interface UserIdentity {
+  userId: string;
+  email?: string;
+  name?: string;
+  organization?: string;
+  plan?: string;
+  [key: string]: any;
+}
+
+export interface TrackOptions {
+  userId?: string;
+  sessionId?: string;
+  conversationId?: string;
+  metadata?: Record<string, any>;
+  toolName?: string;
+  input?: string | Record<string, any>;
+}
+
+export interface SpanData {
+  traceId: string;
+  spanId: string;
+  name: string;
+  startTime: number;
+  endTime?: number;
+  status: 'ok' | 'error';
+  attributes: Record<string, any>;
+  userId?: string;
+  sessionId?: string;
+}

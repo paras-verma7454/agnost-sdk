@@ -1,0 +1,14 @@
+{
+  "name": "agnost-integration-mode",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["packages/*", "examples/*"],
+  "scripts": {
+    "build": "npm run build --workspace=@agnost/agent-mode",
+    "test": "npm run test --workspace=@agnost/agent-mode",
+    "lint": "npm run lint --workspace=@agnost/agent-mode"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

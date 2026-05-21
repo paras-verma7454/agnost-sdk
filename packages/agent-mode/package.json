@@ -1,0 +1,44 @@
+{
+  "name": "@agnost/agent-mode",
+  "version": "0.1.0",
+  "description": "Zero-config analytics integration for AI agents",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.mjs", "require": "./dist/index.js" },
+    "./vercel": { "types": "./dist/frameworks/vercel.d.ts", "import": "./dist/frameworks/vercel.mjs", "require": "./dist/frameworks/vercel.js" },
+    "./openai": { "types": "./dist/frameworks/openai.d.ts", "import": "./dist/frameworks/openai.mjs", "require": "./dist/frameworks/openai.js" },
+    "./mastra": { "types": "./dist/frameworks/mastra.d.ts", "import": "./dist/frameworks/mastra.mjs", "require": "./dist/frameworks/mastra.js" }
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "echo ok"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.57.0",
+    "@opentelemetry/sdk-trace-base": "^1.30.0",
+    "@opentelemetry/resources": "^1.30.0",
+    "@arizeai/openinference-instrumentation-openai": "^2.3.1",
+    "@arizeai/openinference-core": "^1.0.3"
+  },
+  "peerDependencies": {
+    "ai": "^4.0.0 || ^5.0.0 || ^6.0.0",
+    "openai": "^4.95.0",
+    "@mastra/otel-exporter": "*"
+  },
+  "peerDependenciesMeta": {
+    "ai": { "optional": true },
+    "openai": { "optional": true },
+    "@mastra/otel-exporter": { "optional": true }
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsup": "^8.3.0",
+    "vitest": "^3.0.0",
+    "@types/node": "^22.0.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,19 @@
+{
+  "name": "vercel-ai-app",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "tsx app/route.ts"
+  },
+  "dependencies": {
+    "@agnost/agent-mode": "*",
+    "@ai-sdk/openai": "^3.0.64",
+    "ai": "^6.0.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.19",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}
