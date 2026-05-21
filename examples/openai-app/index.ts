@@ -13,10 +13,10 @@ async function main() {
 
   setAgnostContext({ userId: 'user-42', sessionId: 'demo-session', email: 'user@example.com' });
 
-  console.log('[Agnost] Sending test prompt via Groq...');
+  console.log('[Agnost] Sending test prompt via OpenAI...');
 
   const completion = await client.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
+    model: 'gpt-4o-mini',
     messages: [{ role: 'user', content: 'how are you?' }],
   });
 
