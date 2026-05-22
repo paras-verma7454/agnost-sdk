@@ -15,16 +15,16 @@ agnost.ts setup
    ↓
 setupAgnost({ integrations })
    ↓
-Agent Call
+Agent Call (wrapped in agnost.track() or native Vercel/Mastra telemetry)
    ↓
-Framework Adapter ──→ Context Enrichment (userId/sessionId)
+Identity Injection (AsyncLocalStorage → OpenInference setUser/setSession → OTel context)
    ↓
-SpanBatcher (max 1000, flush @ 100 | 5s)
+OTel BatchSpanProcessor (max 1000, flush @ 5s)
    ↓
 OTLP Export ──→ otel.agnost.ai ──→ Agnost Dashboard
 ```
 
-**Pattern:** Client-side wrapper only. The SDK remains stateless and client-side. Persistence and analytics live entirely in Agnost infrastructure. The SDK configures an OTel exporter, instruments the AI SDK, batches spans in memory, and flushes via OTLP.
+**Pattern:** Client-side wrapper only. The SDK remains stateless and client-side. Persistence and analytics live entirely in Agnost infrastructure. The SDK configures an OTel exporter, instruments the AI SDK, and flushes via OTLP. Batching is handled by the standard OTel `BatchSpanProcessor` — no custom transport layer.
 
 ---
 
@@ -39,126 +39,50 @@ Target audience ships AI agents in Node.js/Next.js/Edge. TypeScript gives safety
 - Developers can inspect spans locally without Agnost
 
 ### AsyncLocalStorage for Identity
-`setAgnostContext`/`getAgnostContext` propagates user identity across async chains without threading it through every call. Per-request identity auto-attaches to all spans in that request.
+`setAgnostContext`/`getAgnostContext` propagates user identity across async chains without threading it through every call. At call boundaries, identity is bridged into OTel context via OpenInference's `setUser`/`setSession`, making it compose with any OTel-aware instrumentation.
 
 ### Span Naming Convention
-Manual spans → `tool.<name>` (default `tool.agent_interaction`). Identity attrs → `agnost.user_id`, `agnost.session_id`, `agnost.conversation_id`. Matching the Agnost OTel ingestion spec.
-
-### Batcher Tuning (Engineering Judgment)
-
-**Assumption:** A medium deployment may emit ~10–50 spans/request. At 500 RPS, naive sync export becomes a bottleneck. Batched async export reduces request-path latency and network overhead.
-
-- `max 1000` — bounds memory (~50KB per batch of typical spans)
-- `flush @ 100` — keeps dashboard latency under ~1s at 100 RPS
-- `flush 5s` — safety valve for low-traffic periods
+Manual spans → `tool.<name>` (default `tool.agent_interaction`). Identity attrs are set by OpenInference as `user.id` and `session.id`, matching the OpenInference semantic convention standard.
 
 ### Framework Adapters (Thin Wrappers)
 
 | SDK | Approach |
 |---|---|
-| **Vercel AI** | Proxies `generateText`/`streamText`/etc. to inject `userId`/`sessionId` into `experimental_telemetry.metadata` |
-| **OpenAI** | OpenInference `OpenAIInstrumentation` for span generation + prototype-patches `chat.completions.create` to inject identity. Patched only when explicit instrumentation APIs are unavailable; exposes an opt-out flag and per-client `wrapOpenAIClient()` for teams that prefer explicit wrapping. Known risk: SDK upgrades may break the patch. |
-| **Mastra** | `createMastraExporter()` factory — returns an OTel exporter pre-configured with org credentials |
+| **OpenAI** | `@arizeai/openinference-instrumentation-openai` `OpenAIInstrumentation` for automatic span generation. Identity is injected via `agent.track()` → OTel context → OpenInference picks it up. No prototype patching. |
+| **Vercel AI** | Vercel AI SDK emits `ai.*` spans natively when `experimental_telemetry.isEnabled` is set. Agnost wires the OTel exporter and provides `agent.track()` for identity injection. |
+| **Mastra** | `createMastraExporter()` factory — returns an OTel exporter pre-configured with org credentials. |
 
-### OpenAI SDK — Real-World Integration Patterns
+### Removed: SpanBatcher (Custom Buffering)
 
-**A. Shared setup file:**
-```ts
-// agnost.ts
-import 'dotenv/config';
-import { setupAgnost, setAgnostContext } from '@agnost/agent-mode';
+The original implementation included a custom `SpanBatcher` class that accumulated `SpanData` objects with separate buffering logic. This was removed for the following reasons:
 
-export const agnost = await setupAgnost({
-  orgId: process.env.AGNOST_ORG_ID!,
-  integrations: {
-    openai: true,
-  },
-});
+1. **Redundant with OTel SDK.** The standard OTel `BatchSpanProcessor` already handles buffering (max queue size, scheduled delay, export batching). A second buffering layer added complexity without observable benefit.
+2. **No actual export path.** The custom batcher's flush callback only logged to console (`console.log('[Agnost] Flushing ${n} spans')`). Real export was handled by the standard OTel pipeline.
+3. **Dual SpanData type.** Maintaining a parallel `SpanData` type that mirrors OTel's span model added maintenance burden and type confusion.
 
-export { setAgnostContext };
-```
+The removal simplifies the SDK to a single export pipeline (OTel SDK → `BatchSpanProcessor` → `OTLPTraceExporter`), which matches the official Agnost integration pattern.
 
-**B. Next.js API route (per-request identity from auth):**
-```ts
-// app/api/chat/route.ts
-import OpenAI from 'openai';
-import { getAuth } from '@clerk/nextjs/server';
-import { setAgnostContext } from '@/agnost';
+### Removed: OpenAI Prototype Patching
 
-const client = new OpenAI();
+The original implementation patched `OpenAI.prototype.chat.completions.create` to inject identity from `AsyncLocalStorage` into OTel context. This was replaced with the `agent.track()` wrapper approach because:
 
-export async function POST(req: Request) {
-  const { userId } = getAuth(req);
-  const { message } = await req.json();
+1. **SDK version fragility.** Prototype patching depends on internal SDK structure and breaks between versions. The `openai` SDK's `^4.x` → `^5.x` → `^6.x` migration introduced signature changes that break prototype patches.
+2. **Maintenance burden.** The patch must track changes to the protobuf/HTTP client implementation inside the SDK.
+3. **Alternative exists.** OpenInference `OpenAIInstrumentation` handles span generation automatically; identity injection through `agent.track()` is a clean, explicit alternative that does not depend on internals.
 
-  setAgnostContext({
-    userId,
-    sessionId: req.headers.get('x-session-id') ?? crypto.randomUUID(),
-    email: req.headers.get('x-user-email'),
-  });
+### Removed: Vercel AI SDK Monkey-Patching
 
-  const completion = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [{ role: 'user', content: message }],
-  });
+The original implementation patched `require('ai')` to inject `experimental_telemetry` into every `generateText`/`streamText` call. This was replaced with a log message pointing users to `agent.track()` because:
 
-  return Response.json({ reply: completion.choices[0].message.content });
-}
-```
-
-**C. Express middleware (auto-attach identity to every route):**
-```ts
-// middleware/agnost.ts
-import { setAgnostContext } from '../agnost';
-import { verifyToken } from '../lib/auth';
-
-export function agnostMiddleware(req: any, res: any, next: any) {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (token) {
-    try {
-      const user = verifyToken(token);
-      setAgnostContext({
-        userId: user.id,
-        email: user.email,
-        sessionId: req.session?.id,
-      });
-    } catch {
-      // unauthenticated requests still work — just no identity on spans
-    }
-  }
-  next();
-}
-```
-
-**D. Multi-tenant background worker (per-job identity):**
-```ts
-// workers/chat-processor.ts
-import OpenAI from 'openai';
-import { setAgnostContext } from '../agnost';
-
-const client = new OpenAI();
-
-async function processChatJob(job: { tenantId: string; userId: string; messages: any[] }) {
-  setAgnostContext({
-    userId: job.userId,
-    sessionId: `job-${job.tenantId}-${Date.now()}`,
-    conversationId: crypto.randomUUID(),
-  });
-
-  const completion = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: job.messages,
-  });
-
-  return completion.choices[0].message.content;
-}
-```
+1. **CJS-only.** `require('ai')` fails in ESM environments (tsx, Next.js App Router). Users in those environments received a confusing fallback instruction.
+2. **SDK instability.** The `experimental_telemetry` flag is unstable (pre-1.0 Vercel AI SDK). A monkey-patch that depends on this field risks silent breakage.
+3. **Native support exists.** The Vercel AI SDK emits `ai.*` spans natively when the flag is set. Users only need the OTel exporter (which Agnost provides) and to set `isEnabled: true` on calls they want traced.
 
 ### Config Validation & Setup
 `setupAgnost()` and `withAgnost()` call `validateConfig()` first, guaranteeing a clean `[Agnost] orgId is required` error instead of cryptic OTLP failures. Runtime setup lives in `src/agnost.ts`, while `core/config.ts` stays focused on defaults and validation.
 
 ### Copy-Paste Setup API
-`setupAgnost()` is the primary onboarding API. It creates the agent, initializes OpenTelemetry once, creates the shared `SpanBatcher`, and runs optional integrations:
+`setupAgnost()` is the primary onboarding API. It creates the agent, initializes OpenTelemetry once, and runs optional integrations:
 
 ```ts
 import 'dotenv/config';
@@ -172,8 +96,6 @@ export const agnost = await setupAgnost({
   },
 });
 ```
-
-`withAgnost()` remains available for lower-level/manual setup and backward compatibility.
 
 ### Rejected Alternatives
 
@@ -190,16 +112,16 @@ export const agnost = await setupAgnost({
 ## Failure Handling
 
 - **Export failures do not block inference.** The SDK catches OTLP errors and logs a warning; the calling application is unaffected.
-- **Bounded memory.** The in-memory batcher drops the oldest span when the buffer reaches 1000 spans.
+- **Bounded memory.** The OTel SDK's `BatchSpanProcessor` drops spans when the buffer exceeds its limit.
 - **Final flush.** `agent.shutdown()` flushes buffered spans and shuts down the OTel SDK.
 
 ---
 
 ## Future Vision (Agent Onboarding & Distribution)
 
-**Today:** Explicit `npm install @agnost/agent-mode` + copy-paste `agnost.ts` setup file.
+**Today:** Explicit `npm install @agnost/agent-mode` + copy-paste `agnost.ts` setup file + wrap calls with `agent.track()`.
 
-**Next:** Framework auto-detection. `npx @agnost/agent-mode detect` scans `package.json`, detects Vercel AI / OpenAI / Mastra, and patches the runtime with zero code changes.
+**Next:** Framework auto-detection. `npx @agnost/agent-mode detect` scans `package.json`, detects Vercel AI / OpenAI / Mastra, and configures the runtime with zero code changes.
 
 **Later:** One-click onboarding from Vercel dashboard or OpenAI project settings. Flip a toggle → spans appear in Agnost.
 

@@ -28,14 +28,4 @@ export interface TrackOptions {
   input?: string | Record<string, any>;
 }
 
-export interface SpanData {
-  traceId: string;
-  spanId: string;
-  name: string;
-  startTime: number;
-  endTime?: number;
-  status: 'ok' | 'error';
-  attributes: Record<string, any>;
-  userId?: string;
-  sessionId?: string;
-}
+

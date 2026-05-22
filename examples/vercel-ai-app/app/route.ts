@@ -6,15 +6,15 @@ import { agnost, setAgnostContext } from './agnost';
 setAgnostContext({ userId: 'user-42', email: 'user@example.com', sessionId: 'demo-session' });
 
 async function main() {
-  console.log('[Agnost] Sending test prompt...');
+  console.log('[Agnost] Sending test prompt via Vercel AI SDK...');
 
-  // track() wraps the promise in an OTel span and auto-injects
-  // userId/sessionId from setAgnostContext() — no need to pass them manually.
   const { text } = await agnost.track(
     generateText({
       model: openai('gpt-4o-mini'),
       prompt: 'Say hello in one word',
+      experimental_telemetry: { isEnabled: true },
     }),
+    { toolName: 'vercel_generate' },
   );
 
   console.log(`[Agnost] Response: ${text}`);

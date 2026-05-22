@@ -10,18 +10,20 @@ Copy-paste OpenTelemetry instrumentation for AI agents. Works with **OpenAI SDK*
 
 ```
 DEV APP
-  ├── Vercel AI SDK ──→ @agnost/agent-mode ────→ otel.agnost.ai
-  ├── OpenAI SDK ─────→ (OTLP spans + identity) ─→ Agnost Dashboard
-  └── Mastra SDK ─────→ (auto context)
-                         │
-                    ┌────┴────┐
-                    │ In-mem  │ ← SpanBatcher (max 1000, flush @ 100 | 5s)
-                    └─────────┘
+  ├── Vercel AI SDK ──→ agnost.track() ──→ OTel context ──→ otel.agnost.ai
+  ├── OpenAI SDK ─────→ OpenInference ───→ (identity via   ─→ Agnost Dashboard
+  └── Mastra SDK ─────→ OtelExporter        setUser/setSession)
+                          │
+                     ┌────┴────┐
+                     │ Batch   │ ← OTel BatchSpanProcessor
+                     │ Span    │    (max 1000, flush @ 5s)
+                     │ Proc    │
+                     └─────────┘
 ```
 
 - No database. No backend. In-memory buffer flushed via OTLP to `otel.agnost.ai`.
 - Built on OpenTelemetry — works with any OTel-aware backend.
-- Identity propagates via `AsyncLocalStorage` — no manual threading.
+- Identity propagates via `AsyncLocalStorage` → OpenInference `setUser`/`setSession` → OTel context.
 
 ---
 
@@ -90,35 +92,6 @@ interface UserIdentity {
 }
 ```
 
-### `TrackOptions`
-
-```ts
-interface TrackOptions {
-  userId?: string;
-  sessionId?: string;
-  conversationId?: string;
-  metadata?: Record<string, any>;
-  toolName?: string;        // Auto-prefixed with "tool."
-  input?: string | Record<string, any>;
-}
-```
-
-### `SpanData`
-
-```ts
-interface SpanData {
-  traceId: string;
-  spanId: string;
-  name: string;
-  startTime: number;
-  endTime?: number;
-  status: 'ok' | 'error';
-  attributes: Record<string, any>;
-  userId?: string;
-  sessionId?: string;
-}
-```
-
 ### `setupAgnost(config)` → `Promise<AgnostAgent>`
 
 Creates an `AgnostAgent`, initializes telemetry, and optionally instruments integrations. This is the primary API for website copy-paste snippets.
@@ -138,33 +111,30 @@ const agnost = await setupAgnost({
 
 ### `withAgnost(config)` / `createAgnost(config)` → `AgnostAgent`
 
-Creates an `AgnostAgent` instance without automatically instrumenting integrations. Validates config, initializes the shared OTel provider, and creates the shared `SpanBatcher`.
+Creates an `AgnostAgent` instance without automatically instrumenting integrations.
 
 ```ts
 import 'dotenv/config';
 import { withAgnost } from '@agnost/agent-mode';
 
 const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
-// or with custom endpoint:
-const agnost = withAgnost({ orgId: '...', endpoint: 'https://my-otel-backend.com' });
 ```
 
-### `setAgnostContext(identity)` / `getAgnostContext()`
+### `setAgnostContext(identity)`
 
-Sets/gets user identity in `AsyncLocalStorage`. All spans within the same async chain inherit these attributes.
+Sets user identity in `AsyncLocalStorage`. All `agent.track()` calls within the same async chain inherit these attributes.
 
 ```ts
-import { setAgnostContext, getAgnostContext } from '@agnost/agent-mode';
+import { setAgnostContext } from '@agnost/agent-mode';
 
 setAgnostContext({ userId: 'user-42', sessionId: 'demo-session', email: 'user@example.com' });
-const ctx = getAgnostContext(); // { userId: 'user-42', ... }
 ```
 
 ### `AgnostAgent` Methods
 
 #### `agent.track<T>(input, options?)` → `Promise<T>`
 
-Wraps a Promise or function in an OTel span. Auto-injects identity from context. Records output on success, error on failure. Span name defaults to `tool.agent_interaction` (or `tool.<toolName>`).
+Wraps a Promise or function in an OTel span. Identity is auto-injected from `setAgnostContext()` into OTel context via OpenInference. Span name defaults to `tool.agent_interaction` (or `tool.<toolName>`).
 
 ```ts
 // Promise form
@@ -181,35 +151,13 @@ const result = await agnost.track(
 
 // With identity from context (setAgnostContext already called)
 const result = await agnost.track(
-  generateText({ model: openai('gpt-4o'), prompt: 'Hello' })
+  generateText({ model: openai('gpt-4o'), prompt: 'Hello', experimental_telemetry: { isEnabled: true } })
 );
 ```
 
-#### `agent.begin(name, options?)` → `AgnostSpanBuilder`
-
-Creates a span and returns a builder for manual lifecycle. Span name is auto-prefixed with `tool.`.
-
-```ts
-const span = agnost.begin('process_message', { userId: 'user-1' });
-span.setAttribute('input_length', msg.length);
-// ... do work ...
-span.end(output);
-// or on error:
-span.fail(new Error('processing failed'));
-```
-
-#### `AgnostSpanBuilder` Methods
-
-| Method                              | Description                           |
-|-------------------------------------|---------------------------------------|
-| `setAttribute(key, value)`          | Set a single span attribute           |
-| `setAttributes(attrs)`              | Set multiple attributes               |
-| `end(output?)`                      | End span with optional output         |
-| `fail(error: Error)`                | End span with error status            |
-
 #### `agent.instrumentOpenAI()` → `Promise<void>`
 
-Sets up OpenInference OpenAI instrumentation and patches `OpenAI.prototype.chat.completions.create` at the class level. Every client instance inherits the instrumentation.
+Configures OpenInference `OpenAIInstrumentation` to generate OTel spans from all OpenAI SDK calls. Identity is injected via `agent.track()`.
 
 ```ts
 import 'dotenv/config';
@@ -217,10 +165,13 @@ import 'dotenv/config';
 await agnost.instrumentOpenAI();
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 setAgnostContext({ userId: 'user-42', sessionId: 'demo-session' });
-const completion = await client.chat.completions.create({
-  model: 'gpt-4o',
-  messages: [{ role: 'user', content: 'Hello' }],
-});
+const completion = await agnost.track(
+  client.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [{ role: 'user', content: 'Hello' }],
+  }),
+  { toolName: 'chat_completion' },
+);
 ```
 
 Uses `@arizeai/openinference-instrumentation-openai` under the hood. Also available as standalone function via `@agnost/agent-mode/openai` subpath:
@@ -231,26 +182,23 @@ import { instrumentOpenAI } from '@agnost/agent-mode/openai';
 
 #### `agent.instrumentVercelAI()` → `Promise<void>`
 
-Sets up OTel exporter for Vercel AI SDK. In CJS, auto-patches `generateText`, `streamText`, `generateObject`, `streamObject` to inject `experimental_telemetry` with identity metadata. In ESM (tsx), auto-patching is not supported — use `agent.track()` wrapper instead.
+Configures the OTel exporter for Vercel AI SDK calls. Use `agent.track()` to wrap calls for identity injection.
 
 ```ts
 await agnost.instrumentVercelAI();
 setAgnostContext({ userId: 'user-42', sessionId: 'demo-session' });
 
-// CJS: auto-patches, identity is injected automatically
-const { text } = await generateText({ model: openai('gpt-4o'), prompt: 'Hello' });
-
-// ESM: must wrap with track() for identity injection
 const { text } = await agnost.track(
-  generateText({ model: openai('gpt-4o'), prompt: 'Hello' })
+  generateText({
+    model: openai('gpt-4o'),
+    prompt: 'Hello',
+    experimental_telemetry: { isEnabled: true },
+  }),
+  { toolName: 'vercel_generate' },
 );
 ```
 
 Also available via `@agnost/agent-mode/vercel` subpath.
-
-#### `agent.flush()` → `Promise<void>`
-
-Forces flush of buffered spans to the OTLP endpoint.
 
 #### `agent.shutdown()` → `Promise<void>`
 
@@ -286,41 +234,16 @@ const mastra = new Mastra({
 });
 ```
 
-### `wrapOpenAIClient(client)` (from `@agnost/agent-mode/openai`)
-
-Per-instance OpenAI client wrapping. Useful when you can't or don't want class-level patching.
-
-```ts
-import 'dotenv/config';
-
-import { wrapOpenAIClient } from '@agnost/agent-mode/openai';
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-wrapOpenAIClient(client);
-```
-
 ---
 
 ## Identity Resolution
 
-When a span is created, identity is resolved in this priority order:
+When `agent.track()` is called, identity is resolved in this priority order:
 
-1. **Explicit `TrackOptions`** — `userId`, `sessionId`, `conversationId` passed directly to `track()`, `begin()`, etc.
+1. **Explicit `TrackOptions`** — `userId`, `sessionId` passed directly to `track()`
 2. **`AsyncLocalStorage` context** — Set via `setAgnostContext()` within the same async chain
 
-The identity context logic is in `packages/agent-mode/src/core/context.ts`.
-
----
-
-## Span Batching
-
-| Property           | Value                        |
-|--------------------|------------------------------|
-| Max buffer size    | 1000 spans (drops oldest)    |
-| Batch flush size   | 100 spans                    |
-| Flush interval     | 5 seconds                    |
-| Exit handlers      | SIGTERM, SIGINT, beforeExit  |
-
-The `SpanBatcher` class (`packages/agent-mode/src/core/batcher.ts`) handles all buffering logic. Call `agent.shutdown()` for a guaranteed final flush.
+Resolved identity is injected into OTel context via `@arizeai/openinference-core`'s `setUser`/`setSession`, making it available to any OTel-aware instrumentation downstream.
 
 ---
 
@@ -328,10 +251,10 @@ The `SpanBatcher` class (`packages/agent-mode/src/core/batcher.ts`) handles all 
 
 | Import path                          | Exports                                    |
 |--------------------------------------|--------------------------------------------|
-| `@agnost/agent-mode`                 | `setupAgnost`, `withAgnost`, `createAgnost`, `AgnostAgent`, `AgnostSpanBuilder`, `setAgnostContext`, `getAgnostContext`, `instrumentVercelAI`, `instrumentOpenAI`, `createMastraExporter` |
-| `@agnost/agent-mode/openai`          | `instrumentOpenAI`, `wrapOpenAIClient`      |
-| `@agnost/agent-mode/vercel`          | `instrumentVercelAI`                        |
-| `@agnost/agent-mode/mastra`          | `createMastraExporter`                      |
+| `@agnost/agent-mode`                 | `setupAgnost`, `withAgnost`, `createAgnost`, `AgnostAgent`, `setAgnostContext`, `getAgnostContext`, `instrumentVercelAI`, `instrumentOpenAI`, `createMastraExporter` |
+| `@agnost/agent-mode/openai`          | `instrumentOpenAI`                         |
+| `@agnost/agent-mode/vercel`          | `instrumentVercelAI`                       |
+| `@agnost/agent-mode/mastra`          | `createMastraExporter`                     |
 
 ---
 
@@ -344,7 +267,6 @@ The SDK uses `vitest`. Tests are in `packages/agent-mode/test/index.test.ts`.
 ```ts
 import { describe, it, expect, vi } from 'vitest';
 import { setupAgnost, withAgnost, setAgnostContext, getAgnostContext } from '@agnost/agent-mode';
-import { SpanBatcher } from '../src/core/batcher';
 
 describe('AgnostAgent', () => {
   it('should create agent with orgId', () => {
@@ -391,25 +313,6 @@ describe('Context', () => {
     expect(ctx?.email).toBe('test@example.com');
   });
 });
-
-describe('SpanBatcher', () => {
-  it('should batch and flush spans', async () => {
-    const flushFn = vi.fn().mockResolvedValue(undefined);
-    const batcher = new SpanBatcher(flushFn);
-    for (let i = 0; i < 5; i++) {
-      batcher.add({
-        traceId: `trace-${i}`,
-        spanId: `span-${i}`,
-        name: 'test',
-        startTime: Date.now(),
-        status: 'ok',
-        attributes: {},
-      });
-    }
-    await batcher.flush();
-    expect(flushFn).toHaveBeenCalledTimes(1);
-  });
-});
 ```
 
 Run tests:
@@ -425,9 +328,8 @@ cd packages/agent-mode && npx vitest run
 ## Common Pitfalls
 
 1. **`orgId` is required** — Calling `setupAgnost({})` or `withAgnost({})` throws `[Agnost] orgId is required`.
-2. **Vercel AI auto-patching is CJS-only** — In ESM (e.g. with tsx), use `agent.track()` to wrap calls for identity injection.
-3. **Always call `shutdown()`** — Buffered spans are lost if the process exits without flushing. Call before `process.exit()`.
-4. **Optional peer deps** — `openai`, `ai`, and `@mastra/otel-exporter` are all optional. Missing ones log a warning and skip instrumentation.
-5. **Subpath imports require the full package** — `@agnost/agent-mode/mastra` works only when `@agnost/agent-mode` is installed (it's not a separate package).
-6. **Span name prefixing** — Names are auto-prefixed with `tool.` unless they already start with `tool.`.
-7. **OpenAI instrumentation is class-level** — `instrumentOpenAI()` patches `OpenAI.prototype`, so all instances are affected. Use `wrapOpenAIClient(client)` for per-instance control.
+2. **Always call `shutdown()`** — Buffered spans are lost if the process exits without flushing. Call before `process.exit()`.
+3. **Optional peer deps** — `openai`, `ai`, and `@mastra/otel-exporter` are all optional. Missing ones log a warning and skip instrumentation.
+4. **Subpath imports require the full package** — `@agnost/agent-mode/mastra` works only when `@agnost/agent-mode` is installed (it's not a separate package).
+5. **Span name prefixing** — Names are auto-prefixed with `tool.` unless they already start with `tool.`.
+6. **OpenAI instrumentation uses OpenInference** — `instrumentOpenAI()` configures `@arizeai/openinference-instrumentation-openai`, not a custom patch. Identity injection requires wrapping calls with `agent.track()`.

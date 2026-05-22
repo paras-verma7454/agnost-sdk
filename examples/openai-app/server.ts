@@ -14,10 +14,13 @@ app.post('/chat', async (req, res) => {
 
   setAgnostContext({ userId: userId ?? 'anonymous', sessionId: crypto.randomUUID() });
 
-  const completion = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [{ role: 'user', content: message }],
-  });
+  const completion = await agnost.track(
+    client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: message }],
+    }),
+    { toolName: 'chat_completion' },
+  );
 
   res.json({ reply: completion.choices[0].message.content });
 });

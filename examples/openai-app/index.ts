@@ -9,10 +9,13 @@ async function main() {
 
   console.log('[Agnost] Sending test prompt via OpenAI...');
 
-  const completion = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [{ role: 'user', content: 'how are you?' }],
-  });
+  const completion = await agnost.track(
+    client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: 'how are you?' }],
+    }),
+    { toolName: 'chat_completion' },
+  );
 
   console.log(`[Agnost] Response: ${completion.choices[0].message.content}`);
 
