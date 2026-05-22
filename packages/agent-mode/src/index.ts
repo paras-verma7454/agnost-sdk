@@ -1,14 +1,14 @@
-import { AgnostConfig, TrackOptions, SpanData } from './types';
-import { validateConfig } from './core/config';
+import { AgnostConfig, AgnostSetupConfig, TrackOptions, SpanData } from './types';
 import { SpanBatcher } from './core/batcher';
-import { getOtelProvider, shutdownOtel } from './core/otel';
 import { trace, SpanStatusCode } from '@opentelemetry/api';
 import { setAgnostContext, getAgnostContext } from './core/context';
+import { getAgnostBatcher, getAgnostConfig, initAgnost, shutdownAgnost } from './agnost';
 
 export { setAgnostContext, getAgnostContext };
 export { instrumentVercelAI } from './frameworks/vercel';
 export { instrumentOpenAI, wrapOpenAIClient } from './frameworks/openai';
 export { createMastraExporter } from './frameworks/mastra';
+export type { AgnostConfig, AgnostSetupConfig, UserIdentity, TrackOptions, SpanData } from './types';
 
 function toSpanName(toolName?: string): string {
   const raw = toolName || 'agent_interaction';
@@ -61,15 +61,8 @@ function buildSpanData(
 }
 
 export class AgnostAgent {
-  private config: Required<AgnostConfig>;
-  private batcher: SpanBatcher;
-
   constructor(config: AgnostConfig) {
-    this.config = validateConfig(config);
-    getOtelProvider(this.config);
-    this.batcher = new SpanBatcher(async (spans) => {
-      console.log(`[Agnost] Flushing ${spans.length} spans`);
-    });
+    initAgnost(config);
   }
 
   async track<T>(input: Promise<T> | (() => Promise<T>), options?: TrackOptions): Promise<T> {
@@ -85,13 +78,13 @@ export class AgnostAgent {
       span.setStatus({ code: SpanStatusCode.OK });
       span.setAttribute('output', JSON.stringify(result));
       span.end();
-      this.batcher.add(buildSpanData(span, name, startTime, Date.now(), 'ok', options?.metadata || {}, options));
+      getAgnostBatcher().add(buildSpanData(span, name, startTime, Date.now(), 'ok', options?.metadata || {}, options));
       return result;
     } catch (error) {
       span.setStatus({ code: SpanStatusCode.ERROR, message: (error as Error).message });
       span.recordException(error as Error);
       span.end();
-      this.batcher.add(
+      getAgnostBatcher().add(
         buildSpanData(span, name, startTime, Date.now(), 'error', { error: (error as Error).message, ...options?.metadata }, options),
       );
       throw error;
@@ -102,26 +95,25 @@ export class AgnostAgent {
     const spanName = toSpanName(name);
     const span = trace.getTracer('agnost').startSpan(spanName);
     setIdentityAttrs(span, options);
-    return new AgnostSpanBuilder(span, spanName, this.batcher, options);
+    return new AgnostSpanBuilder(span, spanName, getAgnostBatcher(), options);
   }
 
   async instrumentVercelAI(): Promise<void> {
     const { instrumentVercelAI } = await import('./frameworks/vercel');
-    return instrumentVercelAI(this.config);
+    return instrumentVercelAI(getAgnostConfig());
   }
 
   async instrumentOpenAI(): Promise<void> {
     const { instrumentOpenAI } = await import('./frameworks/openai');
-    return instrumentOpenAI(this.config);
+    return instrumentOpenAI(getAgnostConfig());
   }
 
   async flush(): Promise<void> {
-    await this.batcher.flush();
+    await getAgnostBatcher().flush();
   }
 
   async shutdown(): Promise<void> {
-    await this.batcher.shutdown();
-    await shutdownOtel();
+    await shutdownAgnost();
   }
 }
 
@@ -172,4 +164,19 @@ export class AgnostSpanBuilder {
 
 export function withAgnost(config: AgnostConfig): AgnostAgent {
   return new AgnostAgent(config);
+}
+
+export const createAgnost = withAgnost;
+
+export async function setupAgnost(config: AgnostSetupConfig): Promise<AgnostAgent> {
+  const agent = withAgnost(config);
+
+  if (config.integrations?.openai) {
+    await agent.instrumentOpenAI();
+  }
+  if (config.integrations?.vercelAI) {
+    await agent.instrumentVercelAI();
+  }
+
+  return agent;
 }

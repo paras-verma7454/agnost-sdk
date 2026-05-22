@@ -3,6 +3,13 @@ export interface AgnostConfig {
   endpoint?: string;
 }
 
+export interface AgnostSetupConfig extends AgnostConfig {
+  integrations?: {
+    openai?: boolean;
+    vercelAI?: boolean;
+  };
+}
+
 export interface UserIdentity {
   userId: string;
   email?: string;

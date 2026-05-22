@@ -1,11 +1,10 @@
 import { AgnostConfig } from '../types';
-import { validateConfig } from '../core/config';
-import { getOtelProvider } from '../core/otel';
 import { getAgnostContext } from '../core/context';
+import { getAgnostConfig, initAgnost } from '../agnost';
 
-export async function instrumentVercelAI(config: AgnostConfig): Promise<void> {
-  const resolved = validateConfig(config);
-  getOtelProvider(resolved);
+export async function instrumentVercelAI(config?: AgnostConfig): Promise<void> {
+  if (config) initAgnost(config);
+  getAgnostConfig();
 
   try {
     const ai = require('ai');

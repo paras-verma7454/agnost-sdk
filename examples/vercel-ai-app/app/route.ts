@@ -1,17 +1,11 @@
 import 'dotenv/config';
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
-
-const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
+import { agnost, setAgnostContext } from './agnost';
 
 setAgnostContext({ userId: 'user-42', email: 'user@example.com', sessionId: 'demo-session' });
 
 async function main() {
-  // Sets up OTel exporter. In ESM (tsx), auto-patching is not supported,
-  // so identity is injected via track() wrapper instead.
-  await agnost.instrumentVercelAI();
-
   console.log('[Agnost] Sending test prompt...');
 
   // track() wraps the promise in an OTel span and auto-injects

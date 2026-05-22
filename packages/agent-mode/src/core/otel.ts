@@ -31,5 +31,7 @@ export function getOtelProvider(config: AgnostConfig): NodeSDK {
 }
 
 export function shutdownOtel(): Promise<void> {
-  return sdk?.shutdown() || Promise.resolve();
+  const activeSdk = sdk;
+  sdk = null;
+  return activeSdk?.shutdown() || Promise.resolve();
 }

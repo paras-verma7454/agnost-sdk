@@ -1,10 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
-import { withAgnost, setAgnostContext, getAgnostContext } from '../src/index';
+import { setupAgnost, withAgnost, setAgnostContext, getAgnostContext } from '../src/index';
 import { SpanBatcher } from '../src/core/batcher';
 
 describe('AgnostAgent', () => {
   it('should create agent with orgId', () => {
     const agent = withAgnost({ orgId: 'test-org' });
+    expect(agent).toBeDefined();
+  });
+
+  it('should setup agent with integrations config', async () => {
+    const agent = await setupAgnost({
+      orgId: 'test-org',
+      integrations: {},
+    });
     expect(agent).toBeDefined();
   });
 
@@ -91,4 +99,3 @@ describe('SpanBatcher', () => {
     expect(flushFn).toHaveBeenCalledTimes(1);
   });
 });
-

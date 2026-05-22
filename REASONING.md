@@ -4,22 +4,24 @@
 
 > **"The best integration is the one the developer doesn't know exists until they see the dashboard."**
 
-`@agnost/agent-mode` is a zero-config TS SDK that instruments AI agents (Vercel AI SDK, OpenAI SDK, Mastra), enriches OpenTelemetry spans with user identity, and ships them to `otel.agnost.ai`. The goal: 3 function calls (`withAgnost`, `setAgnostContext`, `.track`) cover 90% of use cases without reading docs.
+`@agnost/agent-mode` is a copy-paste TS SDK that instruments AI agents (Vercel AI SDK, OpenAI SDK, Mastra), enriches OpenTelemetry spans with user identity, and ships them to `otel.agnost.ai`. The goal: users copy one `agnost.ts` setup file from the website, then import `{ agnost, setAgnostContext }` anywhere they call models.
 
 ---
 
 ## Data Flow
 
 ```
+agnost.ts setup
+   ↓
+setupAgnost({ integrations })
+   ↓
 Agent Call
    ↓
 Framework Adapter ──→ Context Enrichment (userId/sessionId)
    ↓
-SpanBatcher (max 1000, flush @ 100 | 5s, gzip)
+SpanBatcher (max 1000, flush @ 100 | 5s)
    ↓
-OTLP Export ──→ Retry w/ jitter ──→ otel.agnost.ai ──→ Agnost Dashboard
-                                    ↓ (unreachable >30s)
-                              Degraded mode (reduce batch frequency)
+OTLP Export ──→ otel.agnost.ai ──→ Agnost Dashboard
 ```
 
 **Pattern:** Client-side wrapper only. The SDK remains stateless and client-side. Persistence and analytics live entirely in Agnost infrastructure. The SDK configures an OTel exporter, instruments the AI SDK, batches spans in memory, and flushes via OTLP.
@@ -49,7 +51,6 @@ Manual spans → `tool.<name>` (default `tool.agent_interaction`). Identity attr
 - `max 1000` — bounds memory (~50KB per batch of typical spans)
 - `flush @ 100` — keeps dashboard latency under ~1s at 100 RPS
 - `flush 5s` — safety valve for low-traffic periods
-- `gzip` — drops batch wire size ~3-5× (OTLP is protobuf)
 
 ### Framework Adapters (Thin Wrappers)
 
@@ -61,14 +62,29 @@ Manual spans → `tool.<name>` (default `tool.agent_interaction`). Identity attr
 
 ### OpenAI SDK — Real-World Integration Patterns
 
-**A. Next.js API route (per-request identity from auth):**
+**A. Shared setup file:**
+```ts
+// agnost.ts
+import 'dotenv/config';
+import { setupAgnost, setAgnostContext } from '@agnost/agent-mode';
+
+export const agnost = await setupAgnost({
+  orgId: process.env.AGNOST_ORG_ID!,
+  integrations: {
+    openai: true,
+  },
+});
+
+export { setAgnostContext };
+```
+
+**B. Next.js API route (per-request identity from auth):**
 ```ts
 // app/api/chat/route.ts
-import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
 import OpenAI from 'openai';
 import { getAuth } from '@clerk/nextjs/server';
+import { setAgnostContext } from '@/agnost';
 
-const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
 const client = new OpenAI();
 
 export async function POST(req: Request) {
@@ -90,10 +106,10 @@ export async function POST(req: Request) {
 }
 ```
 
-**B. Express middleware (auto-attach identity to every route):**
+**C. Express middleware (auto-attach identity to every route):**
 ```ts
 // middleware/agnost.ts
-import { setAgnostContext } from '@agnost/agent-mode';
+import { setAgnostContext } from '../agnost';
 import { verifyToken } from '../lib/auth';
 
 export function agnostMiddleware(req: any, res: any, next: any) {
@@ -114,13 +130,12 @@ export function agnostMiddleware(req: any, res: any, next: any) {
 }
 ```
 
-**C. Multi-tenant background worker (per-job identity):**
+**D. Multi-tenant background worker (per-job identity):**
 ```ts
 // workers/chat-processor.ts
-import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
 import OpenAI from 'openai';
+import { setAgnostContext } from '../agnost';
 
-const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
 const client = new OpenAI();
 
 async function processChatJob(job: { tenantId: string; userId: string; messages: any[] }) {
@@ -139,8 +154,26 @@ async function processChatJob(job: { tenantId: string; userId: string; messages:
 }
 ```
 
-### Config Validation
-All entry points call `validateConfig()` first, guaranteeing a clean `[Agnost] orgId is required` error instead of cryptic OTLP failures.
+### Config Validation & Setup
+`setupAgnost()` and `withAgnost()` call `validateConfig()` first, guaranteeing a clean `[Agnost] orgId is required` error instead of cryptic OTLP failures. Runtime setup lives in `src/agnost.ts`, while `core/config.ts` stays focused on defaults and validation.
+
+### Copy-Paste Setup API
+`setupAgnost()` is the primary onboarding API. It creates the agent, initializes OpenTelemetry once, creates the shared `SpanBatcher`, and runs optional integrations:
+
+```ts
+import 'dotenv/config';
+import { setupAgnost } from '@agnost/agent-mode';
+
+export const agnost = await setupAgnost({
+  orgId: process.env.AGNOST_ORG_ID!,
+  integrations: {
+    openai: true,
+    vercelAI: true,
+  },
+});
+```
+
+`withAgnost()` remains available for lower-level/manual setup and backward compatibility.
 
 ### Rejected Alternatives
 
@@ -157,15 +190,14 @@ All entry points call `validateConfig()` first, guaranteeing a clean `[Agnost] o
 ## Failure Handling
 
 - **Export failures do not block inference.** The SDK catches OTLP errors and logs a warning; the calling application is unaffected.
-- **Exponential retry with jitter.** Failed batches retry at 1s/2s/4s/8s + random jitter (±20%), up to 4 attempts.
-- **Batch dropped after threshold.** After 4 retries the batch is discarded to avoid memory leaks.
-- **Degraded-mode detection.** If the Agnost endpoint is unreachable for >30s, the SDK reduces batch frequency and logs once. Telemetry is never hot-path blocking.
+- **Bounded memory.** The in-memory batcher drops the oldest span when the buffer reaches 1000 spans.
+- **Final flush.** `agent.shutdown()` flushes buffered spans and shuts down the OTel SDK.
 
 ---
 
 ## Future Vision (Agent Onboarding & Distribution)
 
-**Today:** Explicit `npm install @agnost/agent-mode` + 3-line setup in the app entry point.
+**Today:** Explicit `npm install @agnost/agent-mode` + copy-paste `agnost.ts` setup file.
 
 **Next:** Framework auto-detection. `npx @agnost/agent-mode detect` scans `package.json`, detects Vercel AI / OpenAI / Mastra, and patches the runtime with zero code changes.
 

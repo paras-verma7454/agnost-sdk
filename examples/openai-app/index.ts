@@ -1,14 +1,10 @@
 import 'dotenv/config';
 import OpenAI from 'openai';
-import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
-
-const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
+import { agnost, setAgnostContext } from './agnost.js';
 
 const client = new OpenAI();
 
 async function main() {
-  await agnost.instrumentOpenAI();
-
   setAgnostContext({ userId: 'user-42', sessionId: 'demo-session', email: 'user@example.com' });
 
   console.log('[Agnost] Sending test prompt via OpenAI...');

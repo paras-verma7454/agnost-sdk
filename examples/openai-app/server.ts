@@ -1,9 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import OpenAI from 'openai';
-import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
+import { agnost, setAgnostContext } from './agnost.js';
 
-const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
 const client = new OpenAI();
 const app = express();
 

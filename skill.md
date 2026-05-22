@@ -1,6 +1,6 @@
 # @agnost/agent-mode SDK Skill
 
-Zero-config OpenTelemetry instrumentation for AI agents. Works with **OpenAI SDK**, **Vercel AI SDK**, and **Mastra**.
+Copy-paste OpenTelemetry instrumentation for AI agents. Works with **OpenAI SDK**, **Vercel AI SDK**, and **Mastra**.
 
 **When to use this skill:** Any task involving `@agnost/agent-mode` — instrumenting AI SDKs, setting up telemetry, tracking agent spans, writing integration tests, or extending the SDK.
 
@@ -40,12 +40,41 @@ Peer dependencies (all optional — only install what you use):
 
 ## Core API — Full Reference
 
+### Recommended setup file
+
+Users should create one `agnost.ts` file, then import it anywhere they call AI models.
+
+```ts
+import 'dotenv/config';
+import { setupAgnost, setAgnostContext } from '@agnost/agent-mode';
+
+export const agnost = await setupAgnost({
+  orgId: process.env.AGNOST_ORG_ID!,
+  integrations: {
+    openai: true,
+  },
+});
+
+export { setAgnostContext };
+```
+
 ### `AgnostConfig`
 
 | Field      | Type     | Required | Default                  |
 |------------|----------|----------|--------------------------|
 | `orgId`    | `string` | yes      | —                        |
 | `endpoint` | `string` | no       | `https://otel.agnost.ai` |
+
+### `AgnostSetupConfig`
+
+```ts
+interface AgnostSetupConfig extends AgnostConfig {
+  integrations?: {
+    openai?: boolean;
+    vercelAI?: boolean;
+  };
+}
+```
 
 ### `UserIdentity`
 
@@ -90,11 +119,29 @@ interface SpanData {
 }
 ```
 
-### `withAgnost(config)` → `AgnostAgent`
+### `setupAgnost(config)` → `Promise<AgnostAgent>`
 
-Creates an `AgnostAgent` instance. Validates config (throws if `orgId` missing), sets up OTel provider, creates `SpanBatcher`.
+Creates an `AgnostAgent`, initializes telemetry, and optionally instruments integrations. This is the primary API for website copy-paste snippets.
 
 ```ts
+import 'dotenv/config';
+import { setupAgnost } from '@agnost/agent-mode';
+
+const agnost = await setupAgnost({
+  orgId: process.env.AGNOST_ORG_ID!,
+  integrations: {
+    openai: true,
+    vercelAI: true,
+  },
+});
+```
+
+### `withAgnost(config)` / `createAgnost(config)` → `AgnostAgent`
+
+Creates an `AgnostAgent` instance without automatically instrumenting integrations. Validates config, initializes the shared OTel provider, and creates the shared `SpanBatcher`.
+
+```ts
+import 'dotenv/config';
 import { withAgnost } from '@agnost/agent-mode';
 
 const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
@@ -165,6 +212,8 @@ span.fail(new Error('processing failed'));
 Sets up OpenInference OpenAI instrumentation and patches `OpenAI.prototype.chat.completions.create` at the class level. Every client instance inherits the instrumentation.
 
 ```ts
+import 'dotenv/config';
+
 await agnost.instrumentOpenAI();
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 setAgnostContext({ userId: 'user-42', sessionId: 'demo-session' });
@@ -216,6 +265,7 @@ await agnost.shutdown();
 Creates an OTel exporter for use with Mastra's `Observability`.
 
 ```ts
+import 'dotenv/config';
 import { Mastra } from '@mastra/core';
 import { Observability } from '@mastra/observability';
 import { createMastraExporter } from '@agnost/agent-mode/mastra';
@@ -241,6 +291,8 @@ const mastra = new Mastra({
 Per-instance OpenAI client wrapping. Useful when you can't or don't want class-level patching.
 
 ```ts
+import 'dotenv/config';
+
 import { wrapOpenAIClient } from '@agnost/agent-mode/openai';
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 wrapOpenAIClient(client);
@@ -248,19 +300,14 @@ wrapOpenAIClient(client);
 
 ---
 
-## Identity Resolution (7-level Cascade)
+## Identity Resolution
 
 When a span is created, identity is resolved in this priority order:
 
 1. **Explicit `TrackOptions`** — `userId`, `sessionId`, `conversationId` passed directly to `track()`, `begin()`, etc.
 2. **`AsyncLocalStorage` context** — Set via `setAgnostContext()` within the same async chain
-3. **HTTP headers** — `x-user-id` header from incoming request
-4. **Cookies** — `agnost_user_id` cookie
-5. **JWT** — Decoded from `Authorization: Bearer <token>` header (extracts `sub` and `email`)
-6. **Express session** — `req.session.userId`
-7. **Anonymous fallback** — `userId: 'anonymous'`
 
-The identity resolution logic is in `packages/agent-mode/src/core/identity.ts`.
+The identity context logic is in `packages/agent-mode/src/core/context.ts`.
 
 ---
 
@@ -281,7 +328,7 @@ The `SpanBatcher` class (`packages/agent-mode/src/core/batcher.ts`) handles all 
 
 | Import path                          | Exports                                    |
 |--------------------------------------|--------------------------------------------|
-| `@agnost/agent-mode`                 | `withAgnost`, `AgnostAgent`, `AgnostSpanBuilder`, `setAgnostContext`, `getAgnostContext`, `instrumentVercelAI`, `instrumentOpenAI`, `createMastraExporter` |
+| `@agnost/agent-mode`                 | `setupAgnost`, `withAgnost`, `createAgnost`, `AgnostAgent`, `AgnostSpanBuilder`, `setAgnostContext`, `getAgnostContext`, `instrumentVercelAI`, `instrumentOpenAI`, `createMastraExporter` |
 | `@agnost/agent-mode/openai`          | `instrumentOpenAI`, `wrapOpenAIClient`      |
 | `@agnost/agent-mode/vercel`          | `instrumentVercelAI`                        |
 | `@agnost/agent-mode/mastra`          | `createMastraExporter`                      |
@@ -296,12 +343,17 @@ The SDK uses `vitest`. Tests are in `packages/agent-mode/test/index.test.ts`.
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
-import { withAgnost, setAgnostContext, getAgnostContext } from '@agnost/agent-mode';
+import { setupAgnost, withAgnost, setAgnostContext, getAgnostContext } from '@agnost/agent-mode';
 import { SpanBatcher } from '../src/core/batcher';
 
 describe('AgnostAgent', () => {
   it('should create agent with orgId', () => {
     const agent = withAgnost({ orgId: 'test-org' });
+    expect(agent).toBeDefined();
+  });
+
+  it('should setup agent with integrations config', async () => {
+    const agent = await setupAgnost({ orgId: 'test-org', integrations: {} });
     expect(agent).toBeDefined();
   });
 
@@ -372,7 +424,7 @@ cd packages/agent-mode && npx vitest run
 
 ## Common Pitfalls
 
-1. **`orgId` is required** — Calling `withAgnost({})` throws `[Agnost] orgId is required`.
+1. **`orgId` is required** — Calling `setupAgnost({})` or `withAgnost({})` throws `[Agnost] orgId is required`.
 2. **Vercel AI auto-patching is CJS-only** — In ESM (e.g. with tsx), use `agent.track()` to wrap calls for identity injection.
 3. **Always call `shutdown()`** — Buffered spans are lost if the process exits without flushing. Call before `process.exit()`.
 4. **Optional peer deps** — `openai`, `ai`, and `@mastra/otel-exporter` are all optional. Missing ones log a warning and skip instrumentation.

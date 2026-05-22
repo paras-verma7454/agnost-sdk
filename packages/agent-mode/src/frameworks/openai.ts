@@ -1,7 +1,6 @@
 import { AgnostConfig } from '../types';
-import { validateConfig } from '../core/config';
-import { getOtelProvider } from '../core/otel';
 import { getAgnostContext } from '../core/context';
+import { getAgnostConfig, initAgnost } from '../agnost';
 import { context, trace } from '@opentelemetry/api';
 import { setUser, setSession } from '@arizeai/openinference-core';
 
@@ -46,9 +45,9 @@ export function wrapOpenAIClient(client: any): void {
   };
 }
 
-export async function instrumentOpenAI(config: AgnostConfig): Promise<void> {
-  const resolved = validateConfig(config);
-  getOtelProvider(resolved);
+export async function instrumentOpenAI(config?: AgnostConfig): Promise<void> {
+  if (config) initAgnost(config);
+  getAgnostConfig();
 
   try {
     const { OpenAIInstrumentation } = await import('@arizeai/openinference-instrumentation-openai');

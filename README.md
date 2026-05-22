@@ -1,6 +1,6 @@
 # @agnost/agent-mode
 
-Zero-config OpenTelemetry instrumentation for AI agents. Works with **OpenAI SDK**, **Vercel AI SDK**, and **Mastra**.
+Copy-paste OpenTelemetry instrumentation for AI agents. Works with **OpenAI SDK**, **Vercel AI SDK**, and **Mastra**.
 
 > **Not published on npm yet.** Try it locally:
 
@@ -18,12 +18,26 @@ npm run dev
 
 ## Quick Start
 
+Create an `agnost.ts` file once, like you would create `prisma.ts`, `db.ts`, or a Tailwind config. Then import it anywhere you call AI models.
+
+```ts
+// agnost.ts
+import 'dotenv/config';
+import { setupAgnost, setAgnostContext } from '@agnost/agent-mode';
+
+export const agnost = await setupAgnost({
+  orgId: process.env.AGNOST_ORG_ID!,
+  integrations: {
+    openai: true,
+  },
+});
+
+export { setAgnostContext };
+```
+
 ```ts
 import OpenAI from 'openai';
-import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
-
-const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
-await agnost.instrumentOpenAI();
+import { agnost, setAgnostContext } from './agnost';
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -39,18 +53,33 @@ await agnost.shutdown();
 
 ## Why
 
-Every AI agent call emits an OpenTelemetry span enriched with `userId`, `sessionId`, and custom metadata — shipped to `otel.agnost.ai` automatically. No custom HTTP protocols, no backend setup, no config.
+Every AI agent call emits an OpenTelemetry span enriched with `userId`, `sessionId`, and custom metadata — shipped to `otel.agnost.ai` automatically. No custom HTTP protocols, no backend setup, no collector config.
 
 ## Usage
 
 ### OpenAI SDK
 
+Create `agnost.ts`:
+
+```ts
+import 'dotenv/config';
+import { setupAgnost, setAgnostContext } from '@agnost/agent-mode';
+
+export const agnost = await setupAgnost({
+  orgId: process.env.AGNOST_ORG_ID!,
+  integrations: {
+    openai: true,
+  },
+});
+
+export { setAgnostContext };
+```
+
+Use it in your app:
+
 ```ts
 import OpenAI from 'openai';
-import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
-
-const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
-await agnost.instrumentOpenAI();
+import { agnost, setAgnostContext } from './agnost';
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -68,13 +97,28 @@ await agnost.shutdown();
 
 ### Vercel AI SDK
 
+Create `agnost.ts`:
+
+```ts
+import 'dotenv/config';
+import { setupAgnost, setAgnostContext } from '@agnost/agent-mode';
+
+export const agnost = await setupAgnost({
+  orgId: process.env.AGNOST_ORG_ID!,
+  integrations: {
+    vercelAI: true,
+  },
+});
+
+export { setAgnostContext };
+```
+
+Use it in your app:
+
 ```ts
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { withAgnost, setAgnostContext } from '@agnost/agent-mode';
-
-const agnost = withAgnost({ orgId: process.env.AGNOST_ORG_ID! });
-await agnost.instrumentVercelAI();
+import { agnost, setAgnostContext } from './agnost';
 
 setAgnostContext({ userId: 'user-42', sessionId: 'demo-session' });
 
@@ -93,6 +137,7 @@ Use `agnost.track()` to wrap calls — it auto-injects identity from `setAgnostC
 ### Mastra
 
 ```ts
+import 'dotenv/config';
 import { Mastra } from '@mastra/core';
 import { Observability } from '@mastra/observability';
 import { createMastraExporter } from '@agnost/agent-mode/mastra';
@@ -115,9 +160,37 @@ const mastra = new Mastra({
 
 ## API
 
-### `withAgnost(config)`
+### `setupAgnost(config)`
 
-Creates an `AgnostAgent` instance.
+Creates an `AgnostAgent`, initializes telemetry, and optionally instruments integrations. This is the recommended API for copy-paste `agnost.ts` setup files.
+
+```ts
+import 'dotenv/config';
+import { setupAgnost } from '@agnost/agent-mode';
+
+const agnost = await setupAgnost({
+  orgId: process.env.AGNOST_ORG_ID!,
+  integrations: {
+    openai: true,
+    vercelAI: true,
+  },
+});
+```
+
+```ts
+interface AgnostSetupConfig {
+  orgId: string;
+  endpoint?: string;
+  integrations?: {
+    openai?: boolean;
+    vercelAI?: boolean;
+  };
+}
+```
+
+### `withAgnost(config)` / `createAgnost(config)`
+
+Creates an `AgnostAgent` instance without automatically instrumenting integrations.
 
 ```ts
 interface AgnostConfig {
