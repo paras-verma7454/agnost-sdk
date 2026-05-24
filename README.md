@@ -98,31 +98,12 @@ Agent observability today requires developers to understand their framework's te
 
 **End state (native telemetry).** Agent frameworks emit standard OTel spans natively with identity, model metadata, token counts, and tool calls. Agnost becomes a plug-and-play observability layer — no SDK, no wrapper, no config. Developers ship their agents, and traces arrive at the dashboard automatically. The integration is the one the developer doesn't know exists until they see the data.
 
-## Why
-
-Every AI agent call emits an OpenTelemetry span enriched with `userId`, `sessionId`, and custom metadata — shipped to `otel.agnost.ai` automatically. No custom HTTP protocols, no backend setup, no collector config. This is a convenience layer on top of Agnost's existing OpenInference-based integration pattern.
-
 ## Usage
 
+All three integrations share the same pattern — import `{ agnost, setAgnostContext }` from your
+`agnost.ts` setup file (see Quick Start above), then wrap calls with `agent.track()`.
+
 ### OpenAI SDK
-
-Create `agnost.ts`:
-
-```ts
-import 'dotenv/config';
-import { setupAgnost, setAgnostContext } from '@agnost/agent-mode';
-
-export const agnost = await setupAgnost({
-  orgId: process.env.AGNOST_ORG_ID!,
-  integrations: {
-    openai: true,
-  },
-});
-
-export { setAgnostContext };
-```
-
-Use it in your app:
 
 ```ts
 import OpenAI from 'openai';
@@ -143,25 +124,9 @@ const completion = await agnost.track(
 await agnost.shutdown();
 ```
 
-`setupAgnost({ integrations: { openai: true } })` configures the OpenInference `OpenAIInstrumentation` which generates OTel spans from every `chat.completions.create` call. `agent.track()` injects identity into the OTel context, which the instrumentation picks up automatically.
+`setupAgnost({ integrations: { openai: true } })` configures OpenInference's `OpenAIInstrumentation` which generates OTel spans from every `chat.completions.create` call. `agent.track()` injects identity into OTel context; the instrumentation picks it up automatically.
 
 ### Vercel AI SDK
-
-Create `agnost.ts`:
-
-```ts
-import 'dotenv/config';
-import { setupAgnost, setAgnostContext } from '@agnost/agent-mode';
-
-export const agnost = await setupAgnost({
-  orgId: process.env.AGNOST_ORG_ID!,
-  integrations: {},
-});
-
-export { setAgnostContext };
-```
-
-Use it in your app:
 
 ```ts
 import { openai } from '@ai-sdk/openai';
@@ -182,7 +147,7 @@ const { text } = await agnost.track(
 await agnost.shutdown();
 ```
 
-The Vercel AI SDK emits `ai.*` spans natively when `experimental_telemetry.isEnabled` is set. `agent.track()` adds identity attributes to the OTel context and wraps the result in an outer span. No monkey-patching required.
+The Vercel AI SDK emits `ai.*` spans natively when `experimental_telemetry.isEnabled` is set. `agent.track()` pushes identity into the OTel context alongside those spans. No monkey-patching.
 
 ### Mastra
 
@@ -208,7 +173,10 @@ const mastra = new Mastra({
 });
 ```
 
-## API
+Use `createMastraExporter()` from the `@agnost/agent-mode/mastra` subpath export. Pass `userId` / `conversationId` via Mastra's `tracingOptions.metadata` when calling agents.
+
+<details>
+<summary>Full API Reference</summary>
 
 ### `setupAgnost(config)`
 
@@ -317,6 +285,8 @@ const exporter = await createMastraExporter({
 });
 ```
 
+</details>
+
 ## Examples
 
 - [`examples/openai-app/`](examples/openai-app/) — OpenAI + Express
@@ -326,18 +296,35 @@ const exporter = await createMastraExporter({
 ## How it Works
 
 ```
-DEV APP
-  ├── Vercel AI SDK ──→ agnost.track() ──→ OTel context ──→ otel.agnost.ai
-  ├── OpenAI SDK ─────→ OpenInference ───→ (identity via   ─→ Agnost Dashboard
-  └── Mastra SDK ─────→ OtelExporter        setUser/setSession)
-                          │
-                     ┌────┴────┐
-                     │ Batch   │ ← OTel BatchSpanProcessor
-                     │ Span    │    (max 1000, flush @ 5s)
-                     │ Proc    │
-                     └─────────┘
+┌──────────────────────────────────────────────┐
+│                  agnost.ts                     │
+│  setupAgnost({ orgId, integrations })         │
+└──────────────────┬───────────────────────────┘
+                   ↓
+┌──────────────────────────────────────────────┐
+│         Agent Call Pipeline                    │
+│                                                │
+│  agnost.track( client.chat.completions... )    │
+│         │                                      │
+│         ├── AsyncLocalStorage  →  setUser      │
+│         │                       setSession     │
+│         │                       (→ OTel ctx)   │
+│         │                                      │
+│         └── OpenInference / native Vercel      │
+│             telemetry  →  OTel Span            │
+│                                                │
+└──────────────────┬───────────────────────────┘
+                   ↓
+┌──────────────────────────────────────────────┐
+│     OTel BatchSpanProcessor (flush @ 5s)       │
+└──────────────────┬───────────────────────────┘
+                   ↓
+┌──────────────────────────────────────────────┐
+│       OTLP Export  →  otel.agnost.ai           │
+│                  (Agnost Dashboard)             │
+└──────────────────────────────────────────────┘
 ```
 
-- No database. No backend. In-memory buffer flushed via OTLP.
-- Built on OpenTelemetry — works with any OTel-aware observability backend.
-- Identity propagates via `AsyncLocalStorage` → OpenInference `setUser`/`setSession` → OTel context.
+- No database. No collector. No custom transport.
+- Built on OpenTelemetry — works with any OTel-aware backend.
+- Identity flows: `AsyncLocalStorage` → OpenInference → OTel context.

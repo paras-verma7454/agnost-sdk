@@ -7,9 +7,31 @@
 ## Data Flow
 
 ```
-agnost.ts setup → setupAgnost({ integrations }) → Agent Call (wrapped in agnost.track())
-  → Identity Injection (AsyncLocalStorage → OpenInference setUser/setSession → OTel context)
-  → OTel BatchSpanProcessor → OTLP Export → otel.agnost.ai → Agnost Dashboard
+┌─────────────────────────────────────────────────────────────────┐
+│                 agnost.ts  (single setup file)                   │
+│  setupAgnost({ orgId, integrations: { openai, vercelAI } })     │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                   Agent Call Pipeline                             │
+│                                                                   │
+│  agnost.track( client.chat.completions.create(...) )              │
+│         │                                                         │
+│         ├── AsyncLocalStorage  →  setUser / setSession            │
+│         │                       (OpenInference → OTel context)    │
+│         │                                                         │
+│         └── OpenInference Instrumentation  →  OTel Span           │
+│                                                                   │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│              OTel BatchSpanProcessor  (max 1000, flush @ 5s)     │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│              OTLP Export  ──────→  otel.agnost.ai                 │
+│                                   (Agnost Dashboard)              │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 **No database, no collector, no custom transport.** Stateless client-side SDK. Persistence lives entirely in Agnost's infrastructure.
