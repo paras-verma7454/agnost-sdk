@@ -4,3 +4,4 @@ dist/
 .env
 .DS_Store
 coverage/
+AGENT_BUILD_PRD.md
