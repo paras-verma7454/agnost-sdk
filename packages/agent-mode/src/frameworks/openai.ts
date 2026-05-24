@@ -1,6 +1,5 @@
 import { getAgnostConfig, initAgnost } from '../agnost';
 import { trace } from '@opentelemetry/api';
-import { withAgnostIdentity } from '../core/context';
 
 export async function instrumentOpenAI(config?: import('../types').AgnostConfig): Promise<void> {
   if (config) initAgnost(config);
@@ -16,6 +15,16 @@ export async function instrumentOpenAI(config?: import('../types').AgnostConfig)
 
     openAIInstrumentation.manuallyInstrument(OpenAI as never);
   } catch (err) {
-    console.warn('[Agnost] OpenAI SDK not found. Skipping instrumentation.', (err as Error).message);
+    if (isMissingOptionalDependency(err)) {
+      console.warn('[Agnost] OpenAI SDK not found. Skipping instrumentation.', (err as Error).message);
+      return;
+    }
+
+    throw err;
   }
+}
+
+function isMissingOptionalDependency(err: unknown): boolean {
+  const code = (err as { code?: string }).code;
+  return code === 'MODULE_NOT_FOUND' || code === 'ERR_MODULE_NOT_FOUND';
 }

@@ -58,7 +58,7 @@ await agnost.shutdown();
 
 This SDK integrates AI agent observability through a three-layer architecture designed to minimize cognitive overhead while remaining compatible with the broader OpenTelemetry ecosystem.
 
-**Layer 1 — OTel Exporter Bootstrap.** A single `NodeSDK` instance is configured with an `OTLPTraceExporter` pointed at `otel.agnost.ai` and authenticated via `X-Agnost-Org-ID`. This layer runs once at startup and serves all subsequent agent calls. The standard OTel `BatchSpanProcessor` handles buffering and export — no custom transport, no collector, no database.
+**Layer 1 — OTel Exporter Bootstrap.** A single `NodeSDK` instance is configured with an `OTLPTraceExporter` pointed at `otel.agnost.ai` and authenticated via `X-Agnost-Org-ID`. This layer runs once at startup and serves all subsequent agent calls. The standard OTel `BatchSpanProcessor` handles buffering and export — no custom transport, no collector, no database. The package ships dual `.d.ts` (CJS) and `.d.mts` (ESM) declarations — the `exports` field routes the right one automatically.
 
 **Layer 2 — Framework Adapters.** Each supported AI SDK gets a dedicated adapter that wires into the SDK's existing instrumentation story:
 
@@ -76,7 +76,7 @@ Every design decision in this SDK is aimed at reducing the distance between "I w
 
 **Single-file setup.** The integration is one file (`agnost.ts`) pasted from documentation. No config file, no environment bootstrap script, no collector deployment. Install one npm package, create one file, import two symbols.
 
-**Pay-as-you-go dependencies.** Each SDK adapter (`openai`, `ai`, `@mastra/otel-exporter`) is an optional peer dependency. If you use only OpenAI, you install only OpenAI's packages. There is no forced dependency chain.
+**Pay-as-you-go dependencies.** Each SDK adapter (`openai`, `ai`, `@arizeai/openinference-instrumentation-openai`, `@mastra/otel-exporter`) is an optional peer dependency. If you use only OpenAI, you install only OpenAI's packages. There is no forced dependency chain.
 
 **No backend, no collector, no database.** The SDK exposes a stateless OTLP exporter that ships spans directly to `otel.agnost.ai` over HTTPS. There is nothing to self-host, no persistence layer, no queue to manage.
 
@@ -147,7 +147,7 @@ const { text } = await agnost.track(
 await agnost.shutdown();
 ```
 
-The Vercel AI SDK emits `ai.*` spans natively when `experimental_telemetry.isEnabled` is set. `agent.track()` pushes identity into the OTel context alongside those spans. No monkey-patching.
+The Vercel AI SDK emits `ai.*` spans natively when `experimental_telemetry.isEnabled` is set. `agent.track()` pushes identity into the OTel context alongside those spans. Agnost also provides `createVercelTelemetry()` — a helper that returns the correct `experimental_telemetry` config with identity auto-injected from the current async context.
 
 ### Mastra
 
@@ -252,22 +252,37 @@ const result = await agnost.track(
 
 ```ts
 interface TrackOptions {
-  userId?: string;
-  sessionId?: string;
-  conversationId?: string;
-  metadata?: Record<string, any>;
-  toolName?: string;
-  input?: string | Record<string, any>;
+  userId?: string;               // Overrides AsyncLocalStorage identity
+  sessionId?: string;            // Overrides AsyncLocalStorage identity
+  conversationId?: string;       // Set as span attribute conversation.id
+  metadata?: Record<string, any>;// Set as span attributes metadata.*
+  toolName?: string;             // Span name (prefixed with tool.)
+  input?: string | Record<string, any>;  // Set as span attribute input.value
 }
 ```
 
 ### `agent.instrumentOpenAI()`
 
-Configures the OpenInference `OpenAIInstrumentation` to automatically generate OTel spans from OpenAI SDK calls. Identity injection is handled by `agent.track()`.
+Configures the OpenInference `OpenAIInstrumentation` to automatically generate OTel spans from OpenAI SDK calls. Identity injection is handled by `agent.track()`. The OpenInference instrumentation package is an optional peer dependency — it is not installed unless you use this adapter.
 
 ### `agent.instrumentVercelAI()`
 
-Configures the OTel exporter for Vercel AI SDK. Use `agent.track()` to wrap `generateText`/`streamText` calls for identity injection.
+Validates that the Agnost lifecycle is initialized for Vercel AI SDK usage. Use `agent.track()` to wrap `generateText`/`streamText` calls for identity injection.
+
+### `createVercelTelemetry(metadata?)`
+
+Returns a typed `experimental_telemetry` config object with `isEnabled: true` and identity attributes (`userId`, `sessionId`) auto-injected from the current async context. Identity comes from `setAgnostContext()`.
+
+```ts
+import { createVercelTelemetry } from '@agnost/agent-mode';
+import { generateText } from 'ai';
+
+const result = await generateText({
+  model: openai('gpt-4o'),
+  prompt: 'Hello',
+  experimental_telemetry: createVercelTelemetry({ route: '/chat' }),
+});
+```
 
 ### `agent.shutdown()`
 

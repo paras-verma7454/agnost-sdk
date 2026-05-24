@@ -1,11 +1,27 @@
 import { getAgnostConfig, initAgnost } from '../agnost';
+import { getAgnostContext } from '../core/context';
+
+type TelemetryAttributeValue = string | number | boolean;
+
+export interface VercelTelemetryConfig {
+  isEnabled: true;
+  metadata: Record<string, TelemetryAttributeValue>;
+}
 
 export async function instrumentVercelAI(config?: import('../types').AgnostConfig): Promise<void> {
   if (config) initAgnost(config);
   getAgnostConfig();
+}
 
-  console.log('[Agnost] Vercel AI SDK OTel exporter configured.');
-  console.log('[Agnost] Set experimental_telemetry.isEnabled: true on each call to emit ai.* spans.');
-  console.log('[Agnost] Use agnost.track() to wrap calls for identity injection:');
-  console.log('[Agnost]   const result = await agnost.track(generateText({ ... }));');
+export function createVercelTelemetry(metadata: Record<string, TelemetryAttributeValue> = {}): VercelTelemetryConfig {
+  const identity = getAgnostContext();
+
+  return {
+    isEnabled: true,
+    metadata: {
+      ...metadata,
+      ...(identity?.userId ? { userId: identity.userId } : {}),
+      ...(identity?.sessionId ? { sessionId: identity.sessionId } : {}),
+    },
+  };
 }

@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { setupAgnost, withAgnost, setAgnostContext, getAgnostContext } from '../src/index';
+import {
+  createVercelTelemetry,
+  setupAgnost,
+  withAgnost,
+  setAgnostContext,
+  getAgnostContext,
+} from '../src/index';
+import { getAgnostHeaders, getOtlpTraceUrl, validateConfig } from '../src/core/config';
 
 describe('AgnostAgent', () => {
   it('should create agent with orgId', () => {
@@ -74,5 +81,29 @@ describe('Context', () => {
     const ctx = getAgnostContext();
     expect(ctx?.userId).toBe('user-42');
     expect(ctx?.email).toBe('test@example.com');
+  });
+});
+
+describe('OTLP config', () => {
+  it('should centralize trace endpoint and Agnost headers', () => {
+    const config = validateConfig({ orgId: 'test-org', endpoint: 'https://otel.example.com' });
+
+    expect(getOtlpTraceUrl(config)).toBe('https://otel.example.com/v1/traces');
+    expect(getAgnostHeaders(config)).toEqual({ 'X-Agnost-Org-ID': 'test-org' });
+  });
+});
+
+describe('Vercel telemetry', () => {
+  it('should create native telemetry config with current identity', () => {
+    setAgnostContext({ userId: 'user-42', sessionId: 'session-1' });
+
+    expect(createVercelTelemetry({ route: '/chat' })).toEqual({
+      isEnabled: true,
+      metadata: {
+        route: '/chat',
+        userId: 'user-42',
+        sessionId: 'session-1',
+      },
+    });
   });
 });

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { openai } from '@ai-sdk/openai';
 import { generateText } from 'ai';
-import { agnost, setAgnostContext } from './agnost';
+import { agnost, createVercelTelemetry, setAgnostContext } from './agnost';
 
 setAgnostContext({ userId: 'user-42', email: 'user@example.com', sessionId: 'demo-session' });
 
@@ -12,7 +12,7 @@ async function main() {
     generateText({
       model: openai('gpt-4o-mini'),
       prompt: 'Say hello in one word',
-      experimental_telemetry: { isEnabled: true },
+      experimental_telemetry: createVercelTelemetry(),
     }),
     { toolName: 'vercel_generate' },
   );

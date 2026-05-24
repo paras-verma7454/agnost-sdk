@@ -51,6 +51,7 @@ npm install @agnost/agent-mode
 Peer dependencies (all optional — only install what you use):
 - `openai` ^4.95.0
 - `ai` ^4.0.0 || ^5.0.0 || ^6.0.0
+- `@arizeai/openinference-instrumentation-openai` ^2.3.1
 - `@mastra/otel-exporter`
 
 ---
@@ -68,7 +69,8 @@ Key exports:
 | `setAgnostContext(identity)` | Set user identity for current async chain |
 | `agent.track(promise, options?)` | Wrap a call in an OTel span with identity |
 | `agent.instrumentOpenAI()` | Configure OpenInference for OpenAI SDK |
-| `agent.instrumentVercelAI()` | Configure OTel exporter for Vercel AI SDK |
+| `agent.instrumentVercelAI()` | Validate lifecycle is initialized for Vercel AI SDK |
+| `createVercelTelemetry(metadata?)` | Return typed `experimental_telemetry` config with identity |
 | `agent.shutdown()` | Flush and shut down OTel SDK |
 | `createMastraExporter(config)` | Create OtelExporter for Mastra |
 
@@ -89,9 +91,9 @@ Resolved identity is injected into OTel context via `@arizeai/openinference-core
 
 | Import path                          | Exports                                    |
 |--------------------------------------|--------------------------------------------|
-| `@agnost/agent-mode`                 | `setupAgnost`, `withAgnost`, `createAgnost`, `AgnostAgent`, `setAgnostContext`, `getAgnostContext`, `instrumentVercelAI`, `instrumentOpenAI`, `createMastraExporter` |
+| `@agnost/agent-mode`                 | `setupAgnost`, `withAgnost`, `createAgnost`, `AgnostAgent`, `setAgnostContext`, `getAgnostContext`, `createVercelTelemetry`, `instrumentVercelAI`, `instrumentOpenAI`, `createMastraExporter` |
 | `@agnost/agent-mode/openai`          | `instrumentOpenAI`                         |
-| `@agnost/agent-mode/vercel`          | `instrumentVercelAI`                       |
+| `@agnost/agent-mode/vercel`          | `createVercelTelemetry`, `instrumentVercelAI`, `VercelTelemetryConfig` |
 | `@agnost/agent-mode/mastra`          | `createMastraExporter`                     |
 
 ---
@@ -111,7 +113,9 @@ cd packages/agent-mode && npx vitest run   # direct
 
 1. **`orgId` is required** — Calling `setupAgnost({})` or `withAgnost({})` throws `[Agnost] orgId is required`.
 2. **Always call `shutdown()`** — Buffered spans are lost if the process exits without flushing. Call before `process.exit()`.
-3. **Optional peer deps** — `openai`, `ai`, and `@mastra/otel-exporter` are all optional. Missing ones log a warning and skip instrumentation.
+3. **Optional peer deps** — `openai`, `ai`, `@arizeai/openinference-instrumentation-openai`, and `@mastra/otel-exporter` are all optional. Missing ones log a warning and skip instrumentation. OpenAI instrumentation errors are classified: missing deps warn, real runtime failures throw.
 4. **Subpath imports require the full package** — `@agnost/agent-mode/mastra` works only when `@agnost/agent-mode` is installed (it's not a separate package).
 5. **Span name prefixing** — Names are auto-prefixed with `tool.` unless they already start with `tool.`.
-6. **OpenAI instrumentation uses OpenInference** — `instrumentOpenAI()` configures `@arizeai/openinference-instrumentation-openai`, not a custom patch. Identity injection requires wrapping calls with `agent.track()`.
+6. **OpenAI instrumentation uses OpenInference** — `instrumentOpenAI()` configures `@arizeai/openinference-instrumentation-openai` (optional peer dep), not a custom patch. Identity injection requires wrapping calls with `agent.track()`. Only installed when you use the OpenAI adapter.
+7. **Vercel AI SDK identity injection** — Use `createVercelTelemetry()` to get the correct `experimental_telemetry` config with `userId`/`sessionId` auto-injected from the current async context. Pass it directly in your `generateText`/`streamText` call.
+8. **Dual module declarations** — The package ships both `.d.ts` (CJS) and `.d.mts` (ESM) declarations. The `exports` field routes the right one automatically. If your editor reports `ts(7016)`, run `npm run build` first to generate the declaration files.

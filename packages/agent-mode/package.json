@@ -5,10 +5,22 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.mjs", "require": "./dist/index.js" },
-    "./vercel": { "types": "./dist/frameworks/vercel.d.ts", "import": "./dist/frameworks/vercel.mjs", "require": "./dist/frameworks/vercel.js" },
-    "./openai": { "types": "./dist/frameworks/openai.d.ts", "import": "./dist/frameworks/openai.mjs", "require": "./dist/frameworks/openai.js" },
-    "./mastra": { "types": "./dist/frameworks/mastra.d.ts", "import": "./dist/frameworks/mastra.mjs", "require": "./dist/frameworks/mastra.js" }
+    ".": {
+      "import": { "types": "./dist/index.d.mts", "default": "./dist/index.mjs" },
+      "require": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    },
+    "./vercel": {
+      "import": { "types": "./dist/frameworks/vercel.d.mts", "default": "./dist/frameworks/vercel.mjs" },
+      "require": { "types": "./dist/frameworks/vercel.d.ts", "default": "./dist/frameworks/vercel.js" }
+    },
+    "./openai": {
+      "import": { "types": "./dist/frameworks/openai.d.mts", "default": "./dist/frameworks/openai.mjs" },
+      "require": { "types": "./dist/frameworks/openai.d.ts", "default": "./dist/frameworks/openai.js" }
+    },
+    "./mastra": {
+      "import": { "types": "./dist/frameworks/mastra.d.mts", "default": "./dist/frameworks/mastra.mjs" },
+      "require": { "types": "./dist/frameworks/mastra.d.ts", "default": "./dist/frameworks/mastra.js" }
+    }
   },
   "scripts": {
     "build": "tsup",
@@ -21,20 +33,22 @@
     "@opentelemetry/exporter-trace-otlp-proto": "^0.57.0",
     "@opentelemetry/sdk-trace-base": "^1.30.0",
     "@opentelemetry/resources": "^1.30.0",
-    "@arizeai/openinference-instrumentation-openai": "^2.3.1",
     "@arizeai/openinference-core": "^1.0.3"
   },
   "peerDependencies": {
     "ai": "^4.0.0 || ^5.0.0 || ^6.0.0",
     "openai": "^4.95.0",
+    "@arizeai/openinference-instrumentation-openai": "^2.3.1",
     "@mastra/otel-exporter": "*"
   },
   "peerDependenciesMeta": {
     "ai": { "optional": true },
     "openai": { "optional": true },
+    "@arizeai/openinference-instrumentation-openai": { "optional": true },
     "@mastra/otel-exporter": { "optional": true }
   },
   "devDependencies": {
+    "@arizeai/openinference-instrumentation-openai": "^2.3.1",
     "typescript": "^5.7.0",
     "tsup": "^8.3.0",
     "vitest": "^3.0.0",

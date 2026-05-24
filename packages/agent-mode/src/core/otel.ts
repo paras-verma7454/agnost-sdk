@@ -3,6 +3,7 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { Resource } from '@opentelemetry/resources';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { AgnostConfig } from '../types';
+import { getAgnostHeaders, getOtlpTraceUrl } from './config';
 
 let sdk: NodeSDK | null = null;
 
@@ -10,8 +11,8 @@ export function getOtelProvider(config: AgnostConfig): NodeSDK {
   if (sdk) return sdk;
 
   const exporter = new OTLPTraceExporter({
-    url: `${config.endpoint}/v1/traces`,
-    headers: { 'X-Agnost-Org-ID': config.orgId },
+    url: getOtlpTraceUrl(config),
+    headers: getAgnostHeaders(config),
   });
 
   const processor = new BatchSpanProcessor(exporter, {

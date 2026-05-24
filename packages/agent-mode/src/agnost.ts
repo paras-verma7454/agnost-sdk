@@ -12,10 +12,6 @@ export function initAgnost(config: AgnostConfig): void {
   getOtelProvider(resolvedConfig);
 }
 
-export function isAgnostInitialized(): boolean {
-  return resolvedConfig !== null;
-}
-
 export function getAgnostConfig(): Required<AgnostConfig> {
   if (!resolvedConfig) {
     throw new Error('[Agnost] Not initialized. Call setupAgnost() or withAgnost() first.');
